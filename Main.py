@@ -10,12 +10,15 @@ from flask import Flask, request, send_file
 import io
 import os
 import datetime
-
+import asyncio
+import matplotlib
+# This forces Matplotlib to run in the background without a GUI
+matplotlib.use('Agg') 
+import matplotlib.pyplot as plt
 
 
 description = '''Bot meant to help students with their schedules collaboratively'''
 
-# Sets up the bot to work with the discord API
 intents = discord.Intents.default()
 intents.members = True
 intents.messages = True
@@ -26,16 +29,21 @@ map = {}
 bot = commands.Bot(command_prefix='!', description=description, intents=intents)
 
 
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    if message.content.lower().split().count("idgaf")>0:
+        await message.channel.send(message.content)
+    await bot.process_commands(message)
+    
 
-# This function is called when the bot is ready to be used
 @bot.event
 async def on_ready():
-    # Shows that the bot is logged in
     global map
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')  
     fileReader = ""
     map = {}
-    # Reads the file to get the map from the JSON file
     try:
         fileReader = open("data.json", "r")
         read = fileReader.read()
@@ -43,27 +51,21 @@ async def on_ready():
         fileReader.close()
     except:
         print("File does not exist")
-    # Sets the bot's status
     await bot.change_presence(status=discord.Status.offline, activity=discord.Game("Doing stuff"))
     
     synced = await bot.tree.sync()   
     
-# This command prints the map, for debugging purposes
 @bot.command(description="Prints the map")
 async def printMap(ctx):
     await ctx.send(map)
 
-# This command clears the map, for debugging purposes
 @bot.command(description="Clears the map")
 async def clear(ctx):
-    # Checks if the user is the owner of the bot
     if ctx.author.id != 523309470105993226:
         await ctx.send("You do not have permission to clear the map")
         return
     else:
-        # Clears the map and sets it to be empty, then writes it to the file
         global map
-        # Clears the map by writing nothing to it
         writer = open("data.json", "w")
         writer.write("")
         writer.close()
@@ -71,7 +73,6 @@ async def clear(ctx):
         await ctx.send("Map cleared")
 
 
-# This command clears the schedule of the user specified    
 @bot.hybrid_command(name='clear_schedule', with_app_command=True)
 async def clearSchedule(ctx):
     idString = f'{ctx.author.id}'
@@ -83,94 +84,74 @@ async def clearSchedule(ctx):
     await ctx.send("Schedule cleared")
 
 
-# This command adds a course to the user's schedule
 @bot.hybrid_command(name = "add_course", description = "experiment")
 async def addCourse(ctx,course,section):
-    # Tries to add the course to the user's schedule
     try:
-        # Checks if the user is in the map, if not, adds them
         idString = f'{ctx.author.id}'
-        # If the user is not in the map, add them
         if idString not in map:
             map[f'{ctx.author.id}'] = {}
         url = f'https://api.umd.io/v1/courses/{course}'
         response = requests.get(url)
         data = response.json()
-        # Checks if the course is valid
         if response.status_code != 200:
             await ctx.send("Invalid course")
             return
         url = f'https://api.umd.io/v1/courses/{course}/sections/{section}'
         response = requests.get(url)
         data = response.json()
-        # Checks if the section is valid
         if response.status_code != 200:
             await ctx.send("Invalid section!")
             return
 
-        # Adds the course to the user's schedule
-        # by adding the course and section to the map
         tempMap = map[idString]
         tempMap[course.upper()]=section 
         writer = open("data.json", "w")
         string = json.dumps(map)
         writer.write(string)
         writer.close()
-        # Sends a message to the user that the course was added
         await ctx.send(f"Course {course.upper()} added with section {section}")
-    # If there is an error, sends a message to the user
     except:
         await ctx.send("Error adding course")
 
-# This command displays a specific course
 @bot.hybrid_command(name='course', with_app_command=True)
 async def course(ctx, message: str):
     
-    # Writes the map to the file   
     writer = open("data.json", "w")
     string = json.dumps(map)
     writer.write(string)
     writer.close()
-    # Tries to get the course information
     try:
         url = f'https://api.umd.io/v1/courses/{message}'
         response = requests.get(url)
         data = response.json()
         text = ""
         info = ""
-        # Gets the course information by breaking down the json file into pieces
         for course in data:
                 info+=(f"{course['course_id']:}-")
                 info+= (f"{course['name']}\n")
                 text+=(f"Credits: {course['credits']}\n")
                 text+=(f"Description {course['description']}\n")
-                # Gets the prerequisites of the course
                 relation = course['relationships']
-                #Further breaks down the json file to get the prerequisites
                 text+=(f"Prereq:  {relation['prereqs']}\n")
         embed= discord.Embed(title=info,description=text)
     except Exception :
         embed = discord.Embed(title="Invalid Course", description=f"Example of valid course, CMSC131, cmsc131 \nExample of Invalid course name, CMSC 131, CMSC1")
     await ctx.send(embed=embed)
 
-# This command displays the sections of a course    
 @bot.hybrid_command(name='section', with_app_command=True)
 async def section(ctx,message):
-    # Gets the sections of the course
     await ctx.defer()
     url = f'https://api.umd.io/v1/courses/{message}/sections'
     response = requests.get(url)
     data = response.json()
     text=""
     
-    # Breaks down the json file to get the sections
     for course in data:
         text+=f"Course: {course['course']}\n"
         text+=f"Section Number: {course['number']}\n"
         text+=f"Total Seats: {course['seats']}\n"
         text+=f"Open Seats: {course['open_seats']}\n"
         text+=f"Professor: {course['instructors']}\n"
-        # Further breaks it down to get meeting times
 
         for timing in course['meetings']:
             text+=f"Days: {timing['days']}\n"
@@ -181,14 +162,12 @@ async def section(ctx,message):
             text=""
         else:
             text+="\n"
-    # Sends the message to the user to prevent overflow        
     if(len(text)>0):
         await ctx.send(text)
-# This command displays the user's schedule and all courses        
+
 @bot.hybrid_command(name='displayperson')
 async def display_person(ctx, id):
 
-    # Gets rid of the first few characters of the id
     course = map[id[2:len(id)-1]]
     text = ""
     credits = 0
@@ -232,7 +211,6 @@ async def display_person(ctx, id):
                 else:
                     await interaction.response.send_message(e)           
     try:
-        # Gets the course information from the name and ID
         for key in course:
             courseLink = f'https://api.umd.io/v1/courses/{key}'
             sectionLink = f'https://api.umd.io/v1/courses/{key}/sections/{course[key]}'
@@ -248,7 +226,6 @@ async def display_person(ctx, id):
                 credits+=int(datum['credits'])
             text+=f"Section: {courseSection}\n"
             
-            # Breaks down the json file to get the course information
             for datam in section_data:
                 if(datam['instructors']==[]):
                     text+="Instructors: TBA\n"
@@ -260,7 +237,6 @@ async def display_person(ctx, id):
                     text = text[0:-7] + "\n"   
                  
 
-                # Further breaks down the json file to get the professor and times
                 for times in datam['meetings']:
                     text+=f"Meeting: {times['days']}\n"
                     text+=f"Class Time: {times['start_time']}\n"
@@ -285,13 +261,11 @@ async def display_person(ctx, id):
 async def display(ctx):
     await display_person(ctx, str(f'<@{ctx.author.id}>'))
         
-# This command tests an embed
 @bot.command()
 async def embed(ctx):
     embed= discord.Embed(title="Sample")
     await ctx.send(embed=embed)
     
-# This command changes the ID of the bot, for debugging purposes
 @bot.command()
 async def changeId(ctx, id : int):
     await ctx.send(f'ID is now {id}')
@@ -373,102 +347,269 @@ async def remove_course(ctx,course):
     r.close() 
 
 
-async def sch(ctx):
-    schedule = {"M": {}, "Tu": {}, "W": {}, "Th": {}, "F": {}}
-    users = str(f'{ctx.author.id}')
-    users = map[users]
-    for key in users:
-        days = []
-        link = f'https://api.umd.io/v1/courses/{key}/sections/{users[key]}'
-        response = requests.get(link)
-        data = response.json()
-        for datum in data:
-            for times in datum['meetings']:
-                for i in range(len(times['days'])):
-                    if(times['days'][i] == 'h' or times['days'][i] == 'u') :
-                        continue
-                    if times['days'][i] == 'T':
-                        if times['days'][i+1] == 'u':
-                            days.append("Tu")
-                            schedule["Tu"][times['start_time']] = key
-                        else:
-                            days.append("Th")    
-                            schedule["Th"][times['start_time']] = key
-                    else:
-                        days.append(times['days'][i])
-                        schedule[times['days'][i]][times['start_time']] = key              
-    return schedule   
-       
-import matplotlib.pyplot as plt
-import io
-schedule = {"Monday": ["CMSC131", "CMSC132", "CMSC216"], "Tuesday": ["CMSC131", "CMSC132", "CMSC216"], "Wednesday": ["CMSC131", "CMSC132", "CMSC216"], "Thursday": ["CMSC131", "CMSC132", "CMSC216"], "Friday": ["CMSC131", "CMSC132", "CMSC216"]}
-
-async def draw_schedule(ctx):
-    schedule_list = await sch(ctx)
-    print(schedule_list)
-    days = ["Mon", "Tues", "Wed", "Thurs", "Fri"]
-    #indexX = {"M" : 1 , "Tu" : 2, "W" : 3, "Th" : 4, "F" : 5}
-    indexX = {1: "M", 2: "Tu", 3: "W", 4: "Th", 5: "F"}
-    indexY = {}
-    for i in range(8, 100):
-        indexY[i] = i - 7
-    #indexY = {8: 1, 9: 2, 10: 3, 11: 4, 12: 5, 13: 6, 14: 7, 15: 8, 16: 9, 17: 10,18:11,19:12,20:13,21:14,22:15,23:16,24:17,25:18,26:19,27:20,28:21}
+def sch(user_id):
+    schedule = {"M": [], "Tu": [], "W": [], "Th": [], "F": []}
     
-    # Include :30 times for each hour
-    hours = [f"{hour}:00" for hour in range(8, 18)] + [f"{hour}:30" for hour in range(8, 17)]
-    hours.sort(key=lambda time: int(time.split(':')[0]) * 60 + int(time.split(':')[1]))  # Sort times
-
-    fig, ax = plt.subplots()
-    ax.axis('off')
-    table_data = []
-
-    # Prepare table data
-    for hour in hours:
-        hour_schedule = [hour]
-        for day in days:
-            day_schedule = schedule.get(day, [])
-            subject_at_hour = ""
-            for time_slot in day_schedule:
-                if " - " in time_slot:
-                    time, subject = time_slot.split(" - ")
-                    if time == hour:
-                        subject_at_hour = subject
-                        break
-            hour_schedule.append(subject_at_hour)
-        table_data.append(hour_schedule)
+    if user_id not in map:
+        return schedule
         
-    # Create table
-    table = ax.table(cellText=table_data, colLabels=["Time"] + days, cellLoc='center', loc='center')
-    table.auto_set_font_size(False)
-    for i in range(1, 6):
-        for j in schedule_list[indexX[i]]: 
-            if str(j[-2:]) == 'pm':
-                y = int(indexY[(12 + int(j[0:-5]))]) 
-            else: 
-                y = int(indexY[int(j[0:-5])])
-            if(j[-2:] == 'pm' and j[0:-5] == '12'):
-                y-=12
-            if(j[-4:-2] == '30'):
-                y+=.5
-            table[(2*y -1, i)].set_text_props(text=schedule_list[indexX[i]][j]) 
-            cell = table[(2*y -1 , i)] 
-            cell.set_facecolor('yellow')
+    user_courses = map[user_id]
+    headers = {"User-Agent": "TestudoBot/1.0"}
     
-    table.set_fontsize(14)
-    table.scale(1.2, 1.25)
+    for key in user_courses:
+        section = str(user_courses[key]).strip().zfill(4)
+        link = f'https://api.umd.io/v1/courses/{key}/sections/{section}'
+        
+        try:
+            response = requests.get(link, headers=headers)
+            
+            if response.status_code != 200:
+                print(f"Skipping {key} - API returned {response.status_code}")
+                continue 
+                
+            data = response.json()
+            
+            if not isinstance(data, list): 
+                continue
+                
+            for datum in data:
+                for times in datum.get('meetings', []):
+                    start = times.get('start_time')
+                    end = times.get('end_time')
+                    
+                    if not start or not end:
+                        continue
+                        
+                    days_str = times.get('days', '')
+                    
+                    i = 0
+                    while i < len(days_str):
+                        d = days_str[i]
+                        if d in ['h', 'u', 'S', ' ']: 
+                            i += 1
+                            continue
+                        
+                        day_key = d
+                        if d == 'T':
+                            if i + 1 < len(days_str) and days_str[i+1] == 'u':
+                                day_key = 'Tu'
+                                i += 1
+                            else:
+                                day_key = 'Th'
+                                
+                        if day_key in schedule:
+                            schedule[day_key].append({
+                                'course': key, 
+                                'start': start, 
+                                'end': end
+                            })
+                        i += 1
+        except Exception as e:
+            print(f"Critical error fetching {key}: {e}")
+            continue
+            
+    return schedule 
 
-    # Save figure to a BytesIO buffer
+
+def parse_time(time_str):
+    try:
+        t = time_str.lower().strip()
+        if not t or "tba" in t: 
+            return None
+            
+        is_pm = 'pm' in t
+        t = t.replace('am', '').replace('pm', '')
+        
+        # Split without using the word "map" to avoid colliding with your dictionary
+        time_parts = t.split(':')
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+        
+        if is_pm and hour != 12:
+            hour += 12
+        if not is_pm and hour == 12:
+            hour = 0
+            
+        return hour + (minute / 60.0)
+    except Exception as e:
+        print(f"Time parsing error: {e}")
+        return None
+
+def draw_schedule(user_id):
+    schedule_list = sch(user_id)
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    days = ["M", "Tu", "W", "Th", "F"]
+    day_labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    
+    colors = ['#E21833', '#FFD520', '#4285F4', '#34A853', '#9C27B0', '#FF6D00']
+    course_colors = {}
+    color_idx = 0
+
+    min_hour = 8   
+    max_hour = 17  
+
+    for day_idx, day in enumerate(days):
+        for cls in schedule_list[day]:
+            start_float = parse_time(cls['start'])
+            end_float = parse_time(cls['end'])
+            
+            if start_float is None or end_float is None:
+                continue
+                
+            min_hour = min(min_hour, int(start_float))
+            max_hour = max(max_hour, int(end_float) + 1)
+            
+            duration = end_float - start_float
+            course = cls['course']
+            
+            if course not in course_colors:
+                course_colors[course] = colors[color_idx % len(colors)]
+                color_idx += 1
+                
+            bg_color = course_colors[course]
+            text_color = 'black' if bg_color == '#FFD520' else 'white'
+                
+            ax.bar(day_idx, duration, bottom=start_float, width=0.85, 
+                   color=bg_color, edgecolor='#333333', linewidth=1, align='center', alpha=0.95)
+            
+            ax.text(day_idx, start_float + (duration / 2), 
+                    f"{course}\n{cls['start']} - {cls['end']}", 
+                    ha='center', va='center', color=text_color, 
+                    fontsize=10, fontweight='bold')
+
+    ax.set_xlim(-0.5, 4.5)
+    ax.set_xticks(range(5))
+    ax.set_xticklabels(day_labels, fontsize=12, fontweight='bold')
+    
+    ax.set_ylim(max_hour + 0.5, min_hour - 0.5) 
+    ax.set_yticks(range(min_hour, max_hour + 1))
+    
+    def format_hour(h):
+        if h == 0 or h == 24: return "12:00 AM"
+        elif h < 12: return f"{h}:00 AM"
+        elif h == 12: return "12:00 PM"
+        else: return f"{h-12}:00 PM"
+        
+    ax.set_yticklabels([format_hour(h) for h in range(min_hour, max_hour + 1)])
+    
+    ax.grid(axis='y', linestyle='--', alpha=0.6)
+    ax.set_axisbelow(True)
+    for spine in ['top', 'right', 'left', 'bottom']:
+        ax.spines[spine].set_visible(False)
+    
+    ax.set_title("Weekly Schedule", fontsize=16, fontweight='bold', pad=20)
+    
     buf = io.BytesIO()
-    plt.savefig(buf, format='png')
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+def draw_comparison(user1_id, user2_id, name1, name2):
+    sched1 = sch(user1_id)
+    sched2 = sch(user2_id)
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    days = ["M", "Tu", "W", "Th", "F"]
+    day_labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+    min_hour = 8   
+    max_hour = 17  
+
+    # Helper function to draw a schedule with a specific offset and color
+    def plot_sched(schedule, offset, bg_color, text_color):
+        nonlocal min_hour, max_hour
+        for day_idx, day in enumerate(days):
+            for cls in schedule[day]:
+                start_float = parse_time(cls['start'])
+                end_float = parse_time(cls['end'])
+                
+                if start_float is None or end_float is None:
+                    continue
+                    
+                min_hour = min(min_hour, int(start_float))
+                max_hour = max(max_hour, int(end_float) + 1)
+                
+                duration = end_float - start_float
+                course = cls['course']
+                
+                # Shift the block left or right based on the offset
+                x_pos = day_idx + offset
+                
+                # Make the width 0.42 so two blocks fit perfectly side-by-side in a 1.0 width column
+                ax.bar(x_pos, duration, bottom=start_float, width=0.42, 
+                       color=bg_color, edgecolor='#333333', linewidth=1, align='center', alpha=0.95)
+                
+                ax.text(x_pos, start_float + (duration / 2), 
+                        f"{course}", 
+                        ha='center', va='center', color=text_color, 
+                        fontsize=9, fontweight='bold')
+
+    # Draw User 1 shifted to the left (-0.22)
+    plot_sched(sched1, -0.22, '#E21833', 'white') # Red
+    # Draw User 2 shifted to the right (+0.22)
+    plot_sched(sched2, 0.22, '#FFD520', 'black')  # Gold
+
+    # Format the graph
+    ax.set_xlim(-0.5, 4.5)
+    ax.set_xticks(range(5))
+    ax.set_xticklabels(day_labels, fontsize=12, fontweight='bold')
+    
+    ax.set_ylim(max_hour + 0.5, min_hour - 0.5) 
+    ax.set_yticks(range(min_hour, max_hour + 1))
+    
+    def format_hour(h):
+        if h == 0 or h == 24: return "12:00 AM"
+        elif h < 12: return f"{h}:00 AM"
+        elif h == 12: return "12:00 PM"
+        else: return f"{h-12}:00 PM"
+        
+    ax.set_yticklabels([format_hour(h) for h in range(min_hour, max_hour + 1)])
+    
+    ax.grid(axis='y', linestyle='--', alpha=0.6)
+    ax.set_axisbelow(True)
+    for spine in ['top', 'right', 'left', 'bottom']:
+        ax.spines[spine].set_visible(False)
+        
+    # Create a legend so you know who is who
+    import matplotlib.patches as mpatches
+    patch1 = mpatches.Patch(color='#E21833', label=name1)
+    patch2 = mpatches.Patch(color='#FFD520', label=name2)
+    ax.legend(handles=[patch1, patch2], loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=2, frameon=False, fontsize=12)
+    
+    ax.set_title("Schedule Comparison", fontsize=16, fontweight='bold', pad=40)
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
     buf.seek(0)
     plt.close(fig)
     return buf
 
-
 @bot.hybrid_command(name='schedule')
 async def schedule_command(ctx):
-    print("Drawing schedule")
-    buf = await draw_schedule(ctx)
+    await ctx.defer() 
+    
+    print(f"Drawing schedule for {ctx.author.name}")
+    user_id_string = str(ctx.author.id)
+    buf = await asyncio.to_thread(draw_schedule, user_id_string)
     file = discord.File(fp=buf, filename='schedule.png')
-    await ctx.send("Here is the weekly schedule:", file=file)
+    
+    await ctx.send("Here is your weekly schedule:", file=file)
+@bot.hybrid_command(name='compare_visual')
+async def compare_visual_command(ctx, target: discord.Member):
+    await ctx.defer() 
+    
+    user1_id = str(ctx.author.id)
+    user2_id = str(target.id)
+    
+    name1 = ctx.author.display_name
+    name2 = target.display_name
+    
+    print(f"Drawing comparison for {name1} and {name2}")
+    
+    # Pass both IDs and names to the background thread
+    buf = await asyncio.to_thread(draw_comparison, user1_id, user2_id, name1, name2)
+    file = discord.File(fp=buf, filename='comparison.png')
+    
+    await ctx.send(f"Here is the side-by-side comparison for **{name1}** and **{name2}**:", file=file)
 bot.run(os.getenv("DISCORD_TOKEN"))
