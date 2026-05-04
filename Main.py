@@ -26,15 +26,6 @@ map = {}
 bot = commands.Bot(command_prefix='!', description=description, intents=intents)
 
 
-# This function is called whenever a message is sent in the server
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    if message.content.lower().split().count("idgaf")>0:
-        await message.channel.send(message.content)
-    await bot.process_commands(message)
-    
 
 # This function is called when the bot is ready to be used
 @bot.event
